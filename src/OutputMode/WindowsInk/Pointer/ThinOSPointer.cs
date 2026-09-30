@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using OpenTabletDriver.Plugin.Platform.Display;
+using OpenTabletDriver.Plugin.Platform.Pointer;
 
 namespace VoiDPlugins.OutputMode
 {
@@ -50,18 +51,6 @@ namespace VoiDPlugins.OutputMode
     public class ThinOSPointer
     {
         private readonly Vector2 _conversion;
-        private readonly INPUT[] _inputs = new INPUT[]
-        {
-            new INPUT
-            {
-                type = INPUT_TYPE.MOUSE_INPUT,
-                mouse = new MOUSEINPUT
-                {
-                    time = 0,
-                    dwExtraInfo = UIntPtr.Zero
-                }
-            }
-        };
 
         public ThinOSPointer(IVirtualScreen screen)
         {
@@ -71,11 +60,69 @@ namespace VoiDPlugins.OutputMode
         public void SetPosition(Vector2 pos)
         {
             var converted = pos / _conversion;
+            var input = CreateInput(
+                MOUSEEVENTF.ABSOLUTE | MOUSEEVENTF.MOVE | MOUSEEVENTF.VIRTUALDESK,
+                (int)converted.X,
+                (int)converted.Y);
+            _ = SendInput(1, new[] { input }, INPUT.Size);
+        }
 
-            _inputs[0].mouse.dwFlags = MOUSEEVENTF.ABSOLUTE | MOUSEEVENTF.MOVE | MOUSEEVENTF.VIRTUALDESK;
-            _inputs[0].mouse.dx = (int)converted.X;
-            _inputs[0].mouse.dy = (int)converted.Y;
-            _ = SendInput(1, _inputs, INPUT.Size);
+        public void SetPositionAndButton(Vector2 pos, MouseButton button, bool isDown)
+        {
+            var (buttonFlags, mouseData) = GetButtonInput(button, isDown);
+            if (buttonFlags == 0)
+                return;
+
+            var converted = pos / _conversion;
+            INPUT[] inputs =
+            {
+                CreateInput(
+                    MOUSEEVENTF.ABSOLUTE | MOUSEEVENTF.MOVE | MOUSEEVENTF.VIRTUALDESK,
+                    (int)converted.X,
+                    (int)converted.Y),
+                CreateInput(buttonFlags, mouseData: mouseData)
+            };
+            _ = SendInput((uint)inputs.Length, inputs, INPUT.Size);
+        }
+
+        public void SetMouseButton(MouseButton button, bool isDown)
+        {
+            var (buttonFlags, mouseData) = GetButtonInput(button, isDown);
+            if (buttonFlags == 0)
+                return;
+
+            INPUT[] inputs = { CreateInput(buttonFlags, mouseData: mouseData) };
+            _ = SendInput(1, inputs, INPUT.Size);
+        }
+
+        private static INPUT CreateInput(MOUSEEVENTF flags, int x = 0, int y = 0, uint mouseData = 0)
+        {
+            return new INPUT
+            {
+                type = INPUT_TYPE.MOUSE_INPUT,
+                mouse = new MOUSEINPUT
+                {
+                    dx = x,
+                    dy = y,
+                    mouseData = mouseData,
+                    dwFlags = flags,
+                    time = 0,
+                    dwExtraInfo = UIntPtr.Zero
+                }
+            };
+        }
+
+        private static (MOUSEEVENTF Flags, uint MouseData) GetButtonInput(MouseButton button, bool isDown)
+        {
+            return button switch
+            {
+                MouseButton.Left => (isDown ? MOUSEEVENTF.LEFTDOWN : MOUSEEVENTF.LEFTUP, 0),
+                MouseButton.Middle => (isDown ? MOUSEEVENTF.MIDDLEDOWN : MOUSEEVENTF.MIDDLEUP, 0),
+                MouseButton.Right => (isDown ? MOUSEEVENTF.RIGHTDOWN : MOUSEEVENTF.RIGHTUP, 0),
+                MouseButton.Backward => (isDown ? MOUSEEVENTF.XDOWN : MOUSEEVENTF.XUP, 1),
+                MouseButton.Forward => (isDown ? MOUSEEVENTF.XDOWN : MOUSEEVENTF.XUP, 2),
+                _ => (0, 0)
+            };
         }
 
         [DllImport("user32.dll")]

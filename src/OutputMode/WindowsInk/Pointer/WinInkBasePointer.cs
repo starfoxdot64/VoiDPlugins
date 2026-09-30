@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Numerics;
 using OpenTabletDriver.Plugin;
 using OpenTabletDriver.Plugin.Platform.Display;
@@ -10,11 +11,13 @@ using static VoiDPlugins.OutputMode.WindowsInkConstants;
 
 namespace VoiDPlugins.OutputMode
 {
-    public unsafe abstract class WinInkBasePointer : IPressureHandler, ITiltHandler, IEraserHandler, ISynchronousPointer
+    public unsafe abstract class WinInkBasePointer : IPressureHandler, ITiltHandler, IEraserHandler, ISynchronousPointer, IMouseButtonHandler
     {
         private readonly Vector2 _conversionFactor;
         private readonly int _pressureConv;
         private readonly IVirtualScreen _screen;
+        private readonly ThinOSPointer _mousePointer;
+        private readonly HashSet<MouseButton> _mouseButtonsDown = new();
         private ThinOSPointer? _osPointer;
         private Vector2 _internalPos;
         protected DigitizerInputReport* RawPointer { get; }
@@ -32,6 +35,7 @@ namespace VoiDPlugins.OutputMode
         public WinInkBasePointer(string name, TabletReference tabletReference, IVirtualScreen screen)
         {
             _screen = screen;
+            _mousePointer = new ThinOSPointer(screen);
             _conversionFactor = new Vector2(32767, 32767) / new Vector2(screen.Width, screen.Height);
             SharedStore = SharedStore.GetStore(tabletReference, STORE_KEY);
             Instance = SharedStore.GetOrUpdate(INSTANCE, createInstance, out var updated);
@@ -86,6 +90,18 @@ namespace VoiDPlugins.OutputMode
             RawPointer->YTilt = (byte)tilt.Y;
         }
 
+        public void MouseDown(MouseButton button)
+        {
+            _mouseButtonsDown.Add(button);
+            _mousePointer.SetPositionAndButton(_internalPos, button, true);
+        }
+
+        public void MouseUp(MouseButton button)
+        {
+            _mouseButtonsDown.Remove(button);
+            _mousePointer.SetMouseButton(button, false);
+        }
+
         public void Reset()
         {
             if (_osPointer is not null && !ForcedSync)
@@ -101,7 +117,9 @@ namespace VoiDPlugins.OutputMode
                 if (!SharedStore.Get<bool>(TIP_PRESSED))
                     SetPressure(0);
 
-                if (ForcedSync)
+                if (_mouseButtonsDown.Count > 0)
+                    _mousePointer.SetPosition(_internalPos);
+                else if (ForcedSync)
                     SyncOSCursor();
                 Instance.Write();
             }
